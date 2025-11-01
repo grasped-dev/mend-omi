@@ -3,6 +3,7 @@ from config import settings
 from app.models import SentimentType, ReflectionAnalysis
 import logging
 import json
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +13,10 @@ class SentimentAnalyzer:
     Analyzes meal reflections for sentiment and tone
     Uses OpenAI API for natural language understanding
     """
-    
+
     def __init__(self):
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-        
+
         # Keywords that indicate reflective intent
         self.reflection_keywords = [
             "feel", "felt", "feeling",
@@ -25,21 +26,21 @@ class SentimentAnalyzer:
             "enjoyed", "satisfying", "satisfied",
             "stressed", "anxious", "calm"
         ]
-        
+
     async def analyze_reflection(self, text: str) -> ReflectionAnalysis:
         """
         Analyze a meal reflection for sentiment and tone
-        
+
         Args:
             text: User's spoken reflection text
-            
+
         Returns:
             ReflectionAnalysis with sentiment, keywords, and tone indicators
         """
         try:
             # Check if text contains reflective intent
             is_reflective = self._is_reflective(text)
-            
+
             if not is_reflective:
                 return ReflectionAnalysis(
                     text=text,
@@ -48,13 +49,13 @@ class SentimentAnalyzer:
                     keywords=[],
                     tone_indicators={}
                 )
-            
+
             # Use OpenAI to analyze sentiment and tone
             sentiment, tone_indicators = await self._analyze_with_llm(text)
-            
+
             # Extract keywords
             keywords = self._extract_keywords(text)
-            
+
             return ReflectionAnalysis(
                 text=text,
                 sentiment=sentiment,
@@ -62,7 +63,7 @@ class SentimentAnalyzer:
                 keywords=keywords,
                 tone_indicators=tone_indicators
             )
-            
+
         except Exception as e:
             logger.error(f"Error analyzing reflection: {e}")
             return ReflectionAnalysis(
@@ -72,22 +73,55 @@ class SentimentAnalyzer:
                 keywords=[],
                 tone_indicators={}
             )
-            
+
     def _is_reflective(self, text: str) -> bool:
         """Check if text contains reflective language"""
         text_lower = text.lower()
         return any(keyword in text_lower for keyword in self.reflection_keywords)
-        
+
     def _extract_keywords(self, text: str) -> list[str]:
         """Extract relevant keywords from reflection"""
         text_lower = text.lower()
         found_keywords = [kw for kw in self.reflection_keywords if kw in text_lower]
         return found_keywords
-        
+
+    def _extract_json_object(self, text: str) -> str | None:
+        """Best-effort extraction of a JSON object from an LLM response."""
+        if not text:
+            return None
+        # Remove code fences if present
+        text = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", text.strip())
+        # Try direct JSON
+        try:
+            json.loads(text)
+            return text
+        except Exception:
+            pass
+        # Otherwise, extract first well-formed {...}
+        brace_stack = []
+        start_idx = None
+        for i, ch in enumerate(text):
+            if ch == '{':
+                if start_idx is None:
+                    start_idx = i
+                brace_stack.append('{')
+            elif ch == '}':
+                if brace_stack:
+                    brace_stack.pop()
+                    if not brace_stack and start_idx is not None:
+                        candidate = text[start_idx:i+1]
+                        try:
+                            json.loads(candidate)
+                            return candidate
+                        except Exception:
+                            start_idx = None
+                            continue
+        return None
+
     async def _analyze_with_llm(self, text: str) -> tuple[SentimentType, dict]:
         """
         Use OpenAI to analyze sentiment and tone
-        
+
         Returns:
             (sentiment, tone_indicators dict)
         """
@@ -109,29 +143,32 @@ Respond in JSON format:
 }}"""
 
             response = await self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that analyzes meal reflections for emotional tone and mindfulness."},
+                    {"role": "system", "content": "You analyze meal reflections for emotional tone and mindfulness. Output only JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
                 max_tokens=150
             )
-            
-            result_text = response.choices[0].message.content
-            result = json.loads(result_text)
-            
+
+            result_text = response.choices[0].message.content if getattr(response, "choices", None) else "{}"
+            cleaned = self._extract_json_object(result_text)
+            if cleaned is None:
+                logger.warning("LLM returned non-JSON; defaulting to neutral")
+                return SentimentType.NEUTRAL, {}
+
+            result = json.loads(cleaned)
             sentiment_str = result.get("sentiment", "neutral")
             sentiment = self._parse_sentiment(sentiment_str)
-            
             tone_indicators = result.get("tone_indicators", {})
-            
+
             return sentiment, tone_indicators
-            
+
         except Exception as e:
             logger.error(f"Error in LLM analysis: {e}")
             return SentimentType.NEUTRAL, {}
-            
+
     def _parse_sentiment(self, sentiment_str: str) -> SentimentType:
         """Parse sentiment string to SentimentType enum"""
         sentiment_map = {
