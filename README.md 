@@ -1,0 +1,101 @@
+# Mend - Mindful Eating & Nutrition Diary for Omi
+
+Mend is an Omi-powered mindful-eating assistant that listens for eating patterns, helps users reflect on their meals, and builds a compassionate awareness of habits.
+
+## Architecture
+
+```
+Omi Device (BLE mic) 
+   ↓ real-time audio stream (16 kHz, Opus-encoded)
+Omi Mobile App (BLE → Whisper/Deepgram)
+   ↓ JSON / Audio webhooks
+Mend Cloud Backend (FastAPI)
+   ↓ notifications + summaries
+Omi API / Notifications → User's phone
+```
+
+## Features
+
+- Real-time eating sound detection
+- Voice-based meal reflections
+- Sentiment analysis
+- Gentle feedback notifications
+- Weekly insights and summaries
+
+## Tech Stack
+
+- **Backend:** FastAPI (Python 3.11+)
+- **Audio Analysis:** Librosa
+- **Database:** Firebase Firestore
+- **Deployment:** Cloud Run / Fly.io
+- **APIs:** Omi Webhooks, Notifications, Memories
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- pip
+- ngrok (for local testing)
+- Omi Developer Account
+
+### Installation
+
+1. Clone the repository
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+4. Run the development server:
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+5. For local testing with Omi webhooks:
+```bash
+ngrok http 8000
+```
+
+## Configuration
+
+Set these environment variables in `.env`:
+
+- `OMI_APP_ID` - Your Omi App ID
+- `OMI_APP_SECRET` - Your Omi App Secret
+- `FIREBASE_CREDENTIALS_PATH` - Path to Firebase service account JSON
+- `FIREBASE_DATABASE_URL` - Firebase database URL
+- `OPENAI_API_KEY` - OpenAI API key (for sentiment analysis)
+
+## Omi Webhook Endpoints
+
+- `POST /webhook/audio` - Receives real-time audio chunks
+- `POST /webhook/transcript` - Receives real-time transcripts
+
+## API Endpoints
+
+- `GET /health` - Health check
+- `GET /user/{uid}/insights` - Get weekly insights
+- `POST /user/{uid}/feedback` - Send feedback notification
+
+## Development
+
+Run tests:
+```bash
+pytest
+```
+
+Format code:
+```bash
+black .
+```
+
+## License
+
+MIT
